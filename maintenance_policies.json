@@ -1,0 +1,73 @@
+{
+    "simulation_duration": 10000,
+    "num_simulations": 100,
+    "sla_targets": {
+        "availability": 0.975,
+        "max_downtime": 700
+    },
+    "maintenance_policies": [
+        {
+            "name": "Preventive Maintenance",
+            "avg_usage_time": 500,
+            "avg_maintenance_cost": 1000,
+            "avg_replacement_cost": 50000,
+            "avg_service_cost": 500,
+            "failure_rate": 0.002,
+            "repair_time": 24,
+            "components": [
+                {
+                    "name": "engine",
+                    "failure_rate": 0.001,
+                    "repair_time": 12
+                },
+                {
+                    "name": "brakes",
+                    "failure_rate": 0.002,
+                    "repair_time": 8
+                }
+            ]
+        },
+        {
+            "name": "Reactive Maintenance",
+            "avg_usage_time": 300,
+            "avg_maintenance_cost": 500,
+            "avg_replacement_cost": 60000,
+            "avg_service_cost": 1000,
+            "failure_rate": 0.005,
+            "repair_time": 48,
+            "components": [
+                {
+                    "name": "engine",
+                    "failure_rate": 0.002,
+                    "repair_time": 24
+                },
+                {
+                    "name": "brakes",
+                    "failure_rate": 0.003,
+                    "repair_time": 16
+                }
+            ]
+        },
+        {
+            "name": "Predictive Maintenance",
+            "avg_usage_time": 750,
+            "avg_maintenance_cost": 1500,
+            "avg_replacement_cost": 45000,
+            "avg_service_cost": 750,
+            "failure_rate": 0.001,
+            "repair_time": 16,
+            "components": [
+                {
+                    "name": "engine",
+                    "failure_rate": 0.0005,
+                    "repair_time": 8
+                },
+                {
+                    "name": "brakes",
+                    "failure_rate": 0.001,
+                    "repair_time": 6
+                }
+            ]
+        }
+    ]
+}
