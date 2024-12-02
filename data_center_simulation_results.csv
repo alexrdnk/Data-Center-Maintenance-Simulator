@@ -1,0 +1,5 @@
+policy_name,avg_downtime,avg_maintenance_cost,avg_replacements,avg_availability,avg_MTBF,avg_MTTR,std_downtime,std_maintenance_cost,meets_sla
+Policy_RAID0,509.12,159660.0,53.22,94.9088,180.07,9.57,49.57,15294.59,False
+Policy_RAID1,1.2,94725.0,21.05,99.988,486.25,0.06,2.78,14207.11,True
+Policy_RAID5,23.37,315240.0,52.54,99.7663,191.62,0.44,15.22,29981.03,False
+Policy_RAID6,2.55,478950.0,63.86,99.9745,157.75,0.04,5.16,40956.04,True

@@ -17,34 +17,36 @@ class Component:
     repair_time: float
 
 @dataclass
-class MaintenancePolicy:
+class DataCenterPolicy:
     name: str
-    avg_usage_time: float
     avg_maintenance_cost: float
     avg_replacement_cost: float
     avg_service_cost: float
-    failure_rate: float
     repair_time: float
+    raid_level: int
+    number_of_disks: int
+    disk_mttf: float
     components: List[Component] = None
 
 class RailwaySystemSimulator:
     def __init__(self, config_file: str):
         """
-        Initialize the simulator with maintenance policy configurations
+         Initialize the simulator with data center policy configurations
         """
-        logging.info("Initializing simulator with configuration file: %s", config_file)
+        logging.info("Initializing data center simulator with configuration file: %s", config_file)
         with open(config_file, 'r') as f:
             config = json.load(f)
 
         self.policies = [
-            MaintenancePolicy(
+            DataCenterPolicy(
                 name=policy['name'],
-                avg_usage_time=policy['avg_usage_time'],
                 avg_maintenance_cost=policy['avg_maintenance_cost'],
                 avg_replacement_cost=policy['avg_replacement_cost'],
                 avg_service_cost=policy['avg_service_cost'],
-                failure_rate=policy['failure_rate'],
                 repair_time=policy['repair_time'],
+                raid_level=policy['raid_level'],
+                number_of_disks=policy['number_of_disks'],
+                disk_mttf=policy['disk_mttf'],
                 components=[
                     Component(
                         name=comp['name'],
@@ -52,17 +54,17 @@ class RailwaySystemSimulator:
                         repair_time=comp['repair_time']
                     ) for comp in policy.get('components', [])
                 ]
-            ) for policy in config['maintenance_policies']
+            ) for policy in config['data_center_policies']
         ]
 
         self.simulation_duration = config.get('simulation_duration', 10000)
         self.num_simulations = config.get('num_simulations', 100)
         self.sla_targets = config.get('sla_targets', {
-            "availability": 0.99,
-            "max_downtime": 500
+            "availability": 99.99,
+            "max_downtime": 5
         })
 
-        logging.info("Simulator initialized with %d policies.", len(self.policies))
+        logging.info("Simulator initialized with %d data center policies.", len(self.policies))
 
     @staticmethod
     def weibull_failure_time(shape: float, scale: float) -> float:
@@ -71,29 +73,133 @@ class RailwaySystemSimulator:
         """
         return weibull_min.rvs(shape, scale=scale)
 
-    def simulate_policy(self, policy: MaintenancePolicy) -> Dict[str, float]:
+    def simulate_policy(self, policy: DataCenterPolicy) -> Dict[str, float]:
         """
-        Simulate a single maintenance policy
+        Simulate a single data center policy
         """
         total_downtime = 0
         total_maintenance_cost = 0
         total_replacements = 0
         current_time = 0
 
-        while current_time < self.simulation_duration:
-            # Time until next failure using Weibull distribution for aging
-            time_to_failure = self.weibull_failure_time(shape=1.5, scale=policy.avg_usage_time)
-            current_time += time_to_failure
+        # Initialize disks with their time to failure
+        disks = []
+        for _ in range(policy.number_of_disks):
+            time_to_failure = current_time + self.weibull_failure_time(shape=1.5, scale=policy.disk_mttf)
+            disks.append({'failure_time': time_to_failure, 'failed': False})
 
-            if current_time < self.simulation_duration:
-                # Failure occurs
-                total_downtime += policy.repair_time
+        # Initialize variables to keep track of failed disks
+        failed_disks = 0
+        system_down = False
+        downtime_start = None
+
+        # Events will be the times when disks fail or are repaired
+        events = []
+
+        # Schedule initial disk failures
+        for i, disk in enumerate(disks):
+            events.append((disk['failure_time'], 'failure', i))
+
+        # Sort events by time
+        events.sort()
+
+        while current_time < self.simulation_duration and events:
+            # Get the next event
+            event_time, event_type, disk_index = events.pop(0)
+            if event_time > self.simulation_duration:
+                break
+            current_time = event_time
+            disk = disks[disk_index]
+
+            if event_type == 'failure':
+                # Disk fails
+                disk['failed'] = True
+                failed_disks += 1
+                # Check if system is still operational based on RAID level
+                system_failed = False
+                if policy.raid_level == 0:
+                    # RAID 0: any disk failure causes system failure
+                    system_failed = True
+                elif policy.raid_level == 1:
+                    # RAID 1: system fails only if all disks fail
+                    if failed_disks == policy.number_of_disks:
+                        system_failed = True
+                elif policy.raid_level == 5:
+                    # RAID 5: system fails if more than one disk fails
+                    if failed_disks > 1:
+                        system_failed = True
+                elif policy.raid_level == 6:
+                    # RAID 6: system fails if more than two disks fail
+                    if failed_disks > 2:
+                        system_failed = True
+                else:
+                    # For other RAID levels, assume no redundancy
+                    system_failed = True
+
+                if system_failed and not system_down:
+                    # System goes down
+                    system_down = True
+                    downtime_start = current_time
+
+                # Schedule repair
+                repair_time = current_time + policy.repair_time
+                events.append((repair_time, 'repair', disk_index))
+                events.sort()
+
                 total_maintenance_cost += policy.avg_service_cost + policy.avg_maintenance_cost
                 total_replacements += 1
 
-        MTBF = self.simulation_duration / total_replacements if total_replacements > 0 else float('inf')
+            elif event_type == 'repair':
+                # Disk is repaired
+                disk['failed'] = False
+                failed_disks -= 1
+
+                # Check if system can come back up
+                if system_down:
+                    system_recovered = False
+                    if policy.raid_level == 0:
+                        # RAID 0: system can come back up after repair
+                        system_recovered = True
+                    elif policy.raid_level == 1:
+                        # RAID 1: system is up if at least one disk is operational
+                        if failed_disks < policy.number_of_disks:
+                            system_recovered = True
+                    elif policy.raid_level == 5:
+                        # RAID 5: system is up if failed disks <= 1
+                        if failed_disks <= 1:
+                            system_recovered = True
+                    elif policy.raid_level == 6:
+                        # RAID 6: system is up if failed disks <= 2
+                        if failed_disks <= 2:
+                            system_recovered = True
+                    else:
+                        # For other RAID levels, assume no redundancy
+                        system_recovered = False
+
+                    if system_recovered:
+                        # System comes back up
+                        system_down = False
+                        downtime_end = current_time
+                        total_downtime += downtime_end - downtime_start
+                        downtime_start = None
+
+                # Schedule next failure for this disk
+                time_to_failure = current_time + self.weibull_failure_time(shape=1.5, scale=policy.disk_mttf)
+                disk['failure_time'] = time_to_failure
+                events.append((disk['failure_time'], 'failure', disk_index))
+                events.sort()
+
+        # If system is down at the end of simulation, account for remaining downtime
+        if system_down:
+            downtime_end = self.simulation_duration
+            total_downtime += downtime_end - downtime_start
+
+        # After the simulation, calculate metrics
+        total_time = self.simulation_duration
+        uptime = total_time - total_downtime
+        availability = (uptime / total_time) * 100
+        MTBF = uptime / total_replacements if total_replacements > 0 else float('inf')
         MTTR = total_downtime / total_replacements if total_replacements > 0 else 0
-        availability = (MTBF / (MTBF + MTTR)) * 100 if MTBF + MTTR > 0 else 100
 
         return {
             'policy_name': policy.name,
@@ -107,7 +213,7 @@ class RailwaySystemSimulator:
 
     def run_simulations(self) -> List[Dict[str, float]]:
         """
-        Run multiple simulations for each maintenance policy
+        Run multiple simulations for each data center policy
         """
         all_results = []
         logging.info("Starting simulations...")
@@ -143,7 +249,7 @@ class RailwaySystemSimulator:
 
     @staticmethod
     def save_results_to_csv(results: List[Dict[str, float]],
-                            filename: str = 'reliability_simulation_results.csv'):
+                            filename: str = 'data_center_simulation_results.csv'):
         """
         Save simulation results to CSV in a formatted table style.
         Each result will be represented in a row with clear column names.
@@ -248,7 +354,7 @@ class RailwaySystemSimulator:
             [r['policy_name'] for r in results],
             [r['avg_replacements'] for r in results]
         )
-        plt.title('Average Replacements')
+        plt.title('Average Disk Replacements')
         plt.ylabel('Number of Replacements')
         plt.xticks(rotation=45)
 
@@ -273,15 +379,15 @@ class RailwaySystemSimulator:
         plt.xticks(rotation=45)
 
         plt.tight_layout()
-        plt.savefig('maintenance_policy_comparison.png')
+        plt.savefig('data_center_policy_comparison.png')
         plt.close()
 
-        logging.info("Plots generated and saved to 'maintenance_policy_comparison.png'.")
+        logging.info("Plots generated and saved to 'data_center_policy_comparison.png'.")
 
 
 def main():
-    logging.info("Starting the program...")
-    simulator = RailwaySystemSimulator('maintenance_policies.json')
+    logging.info("Starting the data center simulation program...")
+    simulator = RailwaySystemSimulator('data_center_policies.json')
     results = simulator.run_simulations()
     simulator.save_results_to_csv(results)
     simulator.plot_results(results)
