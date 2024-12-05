@@ -104,7 +104,7 @@ Example configuration structure:
 ### Running the Simulator
 
 ```bash
-python data_center_simulator.py
+python simulation.py
 ```
 
 ## 📊 Output
