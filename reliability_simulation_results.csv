@@ -1,4 +1,0 @@
-policy_name,avg_downtime,avg_maintenance_cost,avg_replacements,avg_availability,avg_MTBF,avg_MTTR,std_downtime,std_maintenance_cost,meets_sla
-Preventive Maintenance,518.64,32415.0,21.61,95.0752,474.92,24.0,83.13,5195.7,True
-Reactive Maintenance,1752.96,54780.0,36.52,85.1123,277.82,48.0,211.03,6594.82,False
-Predictive Maintenance,227.36,31972.5,14.21,97.7786,729.95,16.0,41.86,5887.05,True
