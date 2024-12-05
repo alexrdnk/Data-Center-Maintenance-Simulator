@@ -28,7 +28,7 @@ class DataCenterPolicy:
     disk_mttf: float
     components: List[Component] = None
 
-class RailwaySystemSimulator:
+class DataCenterSimulator:
     def __init__(self, config_file: str):
         """
          Initialize the simulator with data center policy configurations
