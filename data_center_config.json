@@ -1,104 +1,105 @@
 {
   "disks": [
     {
-      "model": "Disk-A",
-      "failure_rate": 0.001,
-      "repair_cost": 100,
-      "repair_time": 5,
-      "mttf": 1000
-    },
-    {
-      "model": "Disk-B",
-      "failure_rate": 0.002,
-      "repair_cost": 120,
-      "repair_time": 6,
-      "mttf": 800
-    },
-    {
-      "model": "Disk-C",
-      "failure_rate": 0.0015,
-      "repair_cost": 110,
+      "model": "Consumer HDDs",
+      "failure_rate": 0.01,
+      "repair_cost": 150,
       "repair_time": 4,
-      "mttf": 900
+      "mttf": 6000
+    },
+    {
+      "model": "Enterprise HDDs",
+      "failure_rate": 0.005,
+      "repair_cost": 200,
+      "repair_time": 5,
+      "mttf": 3000
+    },
+    {
+      "model": "High-end SSDs",
+      "failure_rate": 0.01,
+      "repair_cost": 250,
+      "repair_time": 3,
+      "mttf": 4000
     }
   ],
   "servers": [
-        {
+    {
       "name": "Server_3",
-      "availability_target": 99.75,
-      "avg_maintenance_cost": 55,
-      "avg_replacement_cost": 220,
-      "avg_service_cost": 90,
+      "availability_target": 99.9,
+      "avg_maintenance_cost": 300,
+      "avg_replacement_cost": 800,
+      "avg_service_cost": 200,
       "repair_time": 4,
-      "raid_level": 6,
-      "number_of_disks": 5,
-      "disk_mttf": 800
-    },
-     {
-      "name": "Server_2",
-      "availability_target": 99.5,
-      "avg_maintenance_cost": 60,
-      "avg_replacement_cost": 250,
-      "avg_service_cost": 100,
-      "repair_time": 10,
       "raid_level": 6,
       "number_of_disks": 6,
       "disk_mttf": 800
     },
     {
-      "name": "Server_1",
-      "availability_target": 99.9,
-      "avg_maintenance_cost": 60,
-      "avg_replacement_cost": 250,
-      "avg_service_cost": 100,
-      "repair_time": 10,
+      "name": "Server_2",
+      "availability_target": 99.98,
+      "avg_maintenance_cost": 400,
+      "avg_replacement_cost": 1000,
+      "avg_service_cost": 250,
+      "repair_time": 8,
       "raid_level": 6,
       "number_of_disks": 6,
-      "disk_mttf": 800
+      "disk_mttf": 1000
+    },
+    {
+      "name": "Server_1",
+      "availability_target": 99.95,
+      "avg_maintenance_cost": 350,
+      "avg_replacement_cost": 900,
+      "avg_service_cost": 220,
+      "repair_time": 6,
+      "raid_level": 6,
+      "number_of_disks": 5,
+      "disk_mttf": 1000
     }
   ],
   "combinations": [
     {
       "server": "Server_3",
-      "disk": "Disk-A"
+      "disk": "Consumer HDDs"
     },
     {
       "server": "Server_3",
-      "disk": "Disk-B"
+      "disk": "Enterprise HDDs"
     },
     {
       "server": "Server_3",
-      "disk": "Disk-C"
+      "disk": "High-end SSDs"
     },
     {
       "server": "Server_1",
-      "disk": "Disk-A"
+      "disk": "Consumer HDDs"
     },
     {
       "server": "Server_1",
-      "disk": "Disk-B"
+      "disk": "Enterprise HDDs"
     },
     {
       "server": "Server_1",
-      "disk": "Disk-C"
+      "disk": "High-end SSDs"
     },
     {
       "server": "Server_2",
-      "disk": "Disk-A"
+      "disk": "Consumer HDDs"
     },
     {
       "server": "Server_2",
-      "disk": "Disk-B"
+      "disk": "Enterprise HDDs"
     },
     {
       "server": "Server_2",
-      "disk": "Disk-C"
+      "disk": "High-end SSDs"
     }
   ],
-  "simulation_duration": 10000,
-  "num_simulations": 100,
+  "simulation_duration": 12000,
+  "num_simulations": 150,
   "sla_targets": {
     "availability": 0.99,
-    "max_downtime": 5
+    "max_downtime": 6
   }
 }
+
