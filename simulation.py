@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Dict, List
 import csv
+import heapq
 from dataclasses import dataclass
 from scipy.stats import weibull_min
 import logging
@@ -106,19 +107,16 @@ class DataCenterSimulator:
         system_down = False
         downtime_start = None
 
-        # Events will be the times when disks fail or are repaired
+        # Use a heap to manage events by time
         events = []
 
         # Schedule initial disk failures
         for i, disk_info in enumerate(disks):
-            events.append((disk_info['failure_time'], 'failure', i))
-
-        # Sort events by time
-        events.sort()
+            heapq.heappush(events, (disk_info['failure_time'], 'failure', i))
 
         while current_time < self.simulation_duration and events:
             # Get the next event
-            event_time, event_type, disk_index = events.pop(0)
+            event_time, event_type, disk_index = heapq.heappop(events)
             if event_time > self.simulation_duration:
                 break
             current_time = event_time
@@ -131,23 +129,16 @@ class DataCenterSimulator:
                 # Check if system is still operational based on RAID level
                 system_failed = False
                 if server.raid_level == 0:
-                    # RAID 0: any disk failure causes system failure
                     system_failed = True
                 elif server.raid_level == 1:
-                    # RAID 1: system fails only if all disks fail
                     if failed_disks == server.number_of_disks:
                         system_failed = True
                 elif server.raid_level == 5:
-                    # RAID 5: system fails if more than one disk fails
                     if failed_disks > 1:
                         system_failed = True
                 elif server.raid_level == 6:
-                    # RAID 6: system fails if more than two disks fail
                     if failed_disks > 2:
                         system_failed = True
-                else:
-                    # For other RAID levels, assume no redundancy
-                    system_failed = True
 
                 if system_failed and not system_down:
                     # System goes down
@@ -156,8 +147,7 @@ class DataCenterSimulator:
 
                 # Schedule repair
                 repair_time = current_time + disk.repair_time
-                events.append((repair_time, 'repair', disk_index))
-                events.sort()
+                heapq.heappush(events, (repair_time, 'repair', disk_index))
 
                 total_maintenance_cost += server.avg_service_cost + server.avg_maintenance_cost + disk.repair_cost
                 total_replacements += 1
@@ -167,52 +157,42 @@ class DataCenterSimulator:
                 disk_info['failed'] = False
                 failed_disks -= 1
 
-                # Check if system can come back up
+                # Calculate downtime for repair
                 if system_down:
                     system_recovered = False
-                    if server.raid_level == 0:
-                        # RAID 0: system can come back up after repair
+                    print(server.raid_level)
+                    if server.raid_level == 0 or (server.raid_level == 1 and failed_disks < server.number_of_disks) or \
+                            (server.raid_level == 5 and failed_disks <= 1) or (
+                            server.raid_level == 6 and failed_disks <= 2):
                         system_recovered = True
-                    elif server.raid_level == 1:
-                        # RAID 1: system is up if at least one disk is operational
-                        if failed_disks < server.number_of_disks:
-                            system_recovered = True
-                    elif server.raid_level == 5:
-                        # RAID 5: system is up if failed disks <= 1
-                        if failed_disks <= 1:
-                            system_recovered = True
-                    elif server.raid_level == 6:
-                        # RAID 6: system is up if failed disks <= 2
-                        if failed_disks <= 2:
-                            system_recovered = True
-                    else:
-                        # For other RAID levels, assume no redundancy
-                        system_recovered = False
 
                     if system_recovered:
                         # System comes back up
                         system_down = False
                         downtime_end = current_time
-                        total_downtime += downtime_end - downtime_start
+                        print(downtime_end)
+                        downtime_duration = downtime_end - downtime_start
+                        total_downtime += downtime_duration
                         downtime_start = None
 
                 # Schedule next failure for this disk
                 time_to_failure = current_time + self.weibull_failure_time(shape=1.5, scale=disk.mttf)
                 disk_info['failure_time'] = time_to_failure
-                events.append((disk_info['failure_time'], 'failure', disk_index))
-                events.sort()
+                heapq.heappush(events, (disk_info['failure_time'], 'failure', disk_index))
 
         # If system is down at the end of simulation, account for remaining downtime
         if system_down:
             downtime_end = self.simulation_duration
-            total_downtime += downtime_end - downtime_start
+            downtime_duration = downtime_end - downtime_start
+
+            total_downtime += downtime_duration
 
         # After the simulation, calculate metrics
         total_time = self.simulation_duration
         uptime = total_time - total_downtime
         availability = (uptime / total_time) * 100
         MTBF = uptime / total_replacements if total_replacements > 0 else float('inf')
-        MTTR = total_downtime / total_replacements if total_replacements > 0 else 0
+        MTTR = server.repair_time / total_replacements if total_replacements > 0 else 0
 
         return {
             'server_name': server.name,
@@ -222,7 +202,7 @@ class DataCenterSimulator:
             'total_replacements': total_replacements,
             'availability': availability,
             'MTBF': MTBF,
-            'MTTR': MTTR
+            'MTTR': MTTR  # This is where MTTR is calculated
         }
 
     def run_simulations(self) -> List[Dict[str, float]]:
@@ -311,9 +291,6 @@ class DataCenterSimulator:
         # Create a large figure for all subplots
         plt.figure(figsize=(15, 12))
 
-        # Plotting the results in subplots
-
-
         # Maintenance Cost plot
         plt.subplot(2, 2, 1)
         for server in servers:
@@ -326,16 +303,16 @@ class DataCenterSimulator:
         plt.ylabel('Cost')
         plt.xticks(rotation=45, ha='right')
 
-        # Downtime plot
+        # MTTR plot (instead of Downtime plot)
         plt.subplot(2, 2, 2)
         for server in servers:
             server_results = [r for r in results if r['server_name'] == server]
             plt.bar(
                 [f"{r['server_name']}-{r['disk_model']}" for r in server_results],
-                [r['avg_downtime'] for r in server_results]
+                [r['avg_MTTR'] for r in server_results]  # Changed to MTTR
             )
-        plt.title('Average Downtime')
-        plt.ylabel('Downtime (hours)')
+        plt.title('Average MTTR (Mean Time to Repair)')
+        plt.ylabel('MTTR (hours)')
         plt.xticks(rotation=45, ha='right')
 
         # MTBF plot
@@ -361,8 +338,6 @@ class DataCenterSimulator:
         plt.title('Average Disk Replacements')
         plt.ylabel('Replacements')
         plt.xticks(rotation=45, ha='right')
-
-
 
         # Adjust layout to prevent overlapping
         plt.tight_layout()
