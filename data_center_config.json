@@ -1,0 +1,104 @@
+{
+  "disks": [
+    {
+      "model": "Disk-A",
+      "failure_rate": 0.001,
+      "repair_cost": 100,
+      "repair_time": 5,
+      "mttf": 1000
+    },
+    {
+      "model": "Disk-B",
+      "failure_rate": 0.002,
+      "repair_cost": 120,
+      "repair_time": 6,
+      "mttf": 800
+    },
+    {
+      "model": "Disk-C",
+      "failure_rate": 0.0015,
+      "repair_cost": 110,
+      "repair_time": 4,
+      "mttf": 900
+    }
+  ],
+  "servers": [
+        {
+      "name": "Server_3",
+      "availability_target": 99.75,
+      "avg_maintenance_cost": 55,
+      "avg_replacement_cost": 220,
+      "avg_service_cost": 90,
+      "repair_time": 4,
+      "raid_level": 6,
+      "number_of_disks": 5,
+      "disk_mttf": 800
+    },
+     {
+      "name": "Server_2",
+      "availability_target": 99.5,
+      "avg_maintenance_cost": 60,
+      "avg_replacement_cost": 250,
+      "avg_service_cost": 100,
+      "repair_time": 10,
+      "raid_level": 6,
+      "number_of_disks": 6,
+      "disk_mttf": 800
+    },
+    {
+      "name": "Server_1",
+      "availability_target": 99.9,
+      "avg_maintenance_cost": 60,
+      "avg_replacement_cost": 250,
+      "avg_service_cost": 100,
+      "repair_time": 10,
+      "raid_level": 6,
+      "number_of_disks": 6,
+      "disk_mttf": 800
+    }
+  ],
+  "combinations": [
+    {
+      "server": "Server_3",
+      "disk": "Disk-A"
+    },
+    {
+      "server": "Server_3",
+      "disk": "Disk-B"
+    },
+    {
+      "server": "Server_3",
+      "disk": "Disk-C"
+    },
+    {
+      "server": "Server_1",
+      "disk": "Disk-A"
+    },
+    {
+      "server": "Server_1",
+      "disk": "Disk-B"
+    },
+    {
+      "server": "Server_1",
+      "disk": "Disk-C"
+    },
+    {
+      "server": "Server_2",
+      "disk": "Disk-A"
+    },
+    {
+      "server": "Server_2",
+      "disk": "Disk-B"
+    },
+    {
+      "server": "Server_2",
+      "disk": "Disk-C"
+    }
+  ],
+  "simulation_duration": 10000,
+  "num_simulations": 100,
+  "sla_targets": {
+    "availability": 0.99,
+    "max_downtime": 5
+  }
+}

@@ -10,15 +10,20 @@ import logging
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-@dataclass
-class Component:
-    name: str
-    failure_rate: float
-    repair_time: float
 
 @dataclass
-class DataCenterPolicy:
+class Disk:
+    model: str
+    failure_rate: float
+    repair_cost: float
+    repair_time: float
+    mttf: float
+
+
+@dataclass
+class Server:
     name: str
+    availability_target: float
     avg_maintenance_cost: float
     avg_replacement_cost: float
     avg_service_cost: float
@@ -26,45 +31,53 @@ class DataCenterPolicy:
     raid_level: int
     number_of_disks: int
     disk_mttf: float
-    components: List[Component] = None
+
 
 class DataCenterSimulator:
     def __init__(self, config_file: str):
         """
-         Initialize the simulator with data center policy configurations
+        Initialize the simulator with data center configuration
         """
         logging.info("Initializing data center simulator with configuration file: %s", config_file)
         with open(config_file, 'r') as f:
             config = json.load(f)
 
-        self.policies = [
-            DataCenterPolicy(
-                name=policy['name'],
-                avg_maintenance_cost=policy['avg_maintenance_cost'],
-                avg_replacement_cost=policy['avg_replacement_cost'],
-                avg_service_cost=policy['avg_service_cost'],
-                repair_time=policy['repair_time'],
-                raid_level=policy['raid_level'],
-                number_of_disks=policy['number_of_disks'],
-                disk_mttf=policy['disk_mttf'],
-                components=[
-                    Component(
-                        name=comp['name'],
-                        failure_rate=comp['failure_rate'],
-                        repair_time=comp['repair_time']
-                    ) for comp in policy.get('components', [])
-                ]
-            ) for policy in config['data_center_policies']
-        ]
+        # Parse disks
+        self.disks = {
+            disk['model']: Disk(
+                model=disk['model'],
+                failure_rate=disk['failure_rate'],
+                repair_cost=disk['repair_cost'],
+                repair_time=disk['repair_time'],
+                mttf=disk['mttf']
+            ) for disk in config['disks']
+        }
 
+        # Parse servers
+        self.servers = {
+            server['name']: Server(
+                name=server['name'],
+                availability_target=server['availability_target'],
+                avg_maintenance_cost=server['avg_maintenance_cost'],
+                avg_replacement_cost=server['avg_replacement_cost'],
+                avg_service_cost=server['avg_service_cost'],
+                repair_time=server['repair_time'],
+                raid_level=server['raid_level'],
+                number_of_disks=server['number_of_disks'],
+                disk_mttf=server['disk_mttf']
+            ) for server in config['servers']
+        }
+
+        # Parse combinations and simulation parameters
+        self.combinations = config['combinations']
         self.simulation_duration = config.get('simulation_duration', 10000)
         self.num_simulations = config.get('num_simulations', 100)
         self.sla_targets = config.get('sla_targets', {
-            "availability": 99.99,
+            "availability": 0.99,
             "max_downtime": 5
         })
 
-        logging.info("Simulator initialized with %d data center policies.", len(self.policies))
+        logging.info("Simulator initialized with %d server-disk combinations.", len(self.combinations))
 
     @staticmethod
     def weibull_failure_time(shape: float, scale: float) -> float:
@@ -73,9 +86,9 @@ class DataCenterSimulator:
         """
         return weibull_min.rvs(shape, scale=scale)
 
-    def simulate_policy(self, policy: DataCenterPolicy) -> Dict[str, float]:
+    def simulate_configuration(self, server: Server, disk: Disk) -> Dict[str, float]:
         """
-        Simulate a single data center policy
+        Simulate a single server and disk configuration
         """
         total_downtime = 0
         total_maintenance_cost = 0
@@ -84,8 +97,8 @@ class DataCenterSimulator:
 
         # Initialize disks with their time to failure
         disks = []
-        for _ in range(policy.number_of_disks):
-            time_to_failure = current_time + self.weibull_failure_time(shape=1.5, scale=policy.disk_mttf)
+        for _ in range(server.number_of_disks):
+            time_to_failure = current_time + self.weibull_failure_time(shape=1.5, scale=disk.mttf)
             disks.append({'failure_time': time_to_failure, 'failed': False})
 
         # Initialize variables to keep track of failed disks
@@ -97,8 +110,8 @@ class DataCenterSimulator:
         events = []
 
         # Schedule initial disk failures
-        for i, disk in enumerate(disks):
-            events.append((disk['failure_time'], 'failure', i))
+        for i, disk_info in enumerate(disks):
+            events.append((disk_info['failure_time'], 'failure', i))
 
         # Sort events by time
         events.sort()
@@ -109,26 +122,26 @@ class DataCenterSimulator:
             if event_time > self.simulation_duration:
                 break
             current_time = event_time
-            disk = disks[disk_index]
+            disk_info = disks[disk_index]
 
             if event_type == 'failure':
                 # Disk fails
-                disk['failed'] = True
+                disk_info['failed'] = True
                 failed_disks += 1
                 # Check if system is still operational based on RAID level
                 system_failed = False
-                if policy.raid_level == 0:
+                if server.raid_level == 0:
                     # RAID 0: any disk failure causes system failure
                     system_failed = True
-                elif policy.raid_level == 1:
+                elif server.raid_level == 1:
                     # RAID 1: system fails only if all disks fail
-                    if failed_disks == policy.number_of_disks:
+                    if failed_disks == server.number_of_disks:
                         system_failed = True
-                elif policy.raid_level == 5:
+                elif server.raid_level == 5:
                     # RAID 5: system fails if more than one disk fails
                     if failed_disks > 1:
                         system_failed = True
-                elif policy.raid_level == 6:
+                elif server.raid_level == 6:
                     # RAID 6: system fails if more than two disks fail
                     if failed_disks > 2:
                         system_failed = True
@@ -142,33 +155,33 @@ class DataCenterSimulator:
                     downtime_start = current_time
 
                 # Schedule repair
-                repair_time = current_time + policy.repair_time
+                repair_time = current_time + disk.repair_time
                 events.append((repair_time, 'repair', disk_index))
                 events.sort()
 
-                total_maintenance_cost += policy.avg_service_cost + policy.avg_maintenance_cost
+                total_maintenance_cost += server.avg_service_cost + server.avg_maintenance_cost + disk.repair_cost
                 total_replacements += 1
 
             elif event_type == 'repair':
                 # Disk is repaired
-                disk['failed'] = False
+                disk_info['failed'] = False
                 failed_disks -= 1
 
                 # Check if system can come back up
                 if system_down:
                     system_recovered = False
-                    if policy.raid_level == 0:
+                    if server.raid_level == 0:
                         # RAID 0: system can come back up after repair
                         system_recovered = True
-                    elif policy.raid_level == 1:
+                    elif server.raid_level == 1:
                         # RAID 1: system is up if at least one disk is operational
-                        if failed_disks < policy.number_of_disks:
+                        if failed_disks < server.number_of_disks:
                             system_recovered = True
-                    elif policy.raid_level == 5:
+                    elif server.raid_level == 5:
                         # RAID 5: system is up if failed disks <= 1
                         if failed_disks <= 1:
                             system_recovered = True
-                    elif policy.raid_level == 6:
+                    elif server.raid_level == 6:
                         # RAID 6: system is up if failed disks <= 2
                         if failed_disks <= 2:
                             system_recovered = True
@@ -184,9 +197,9 @@ class DataCenterSimulator:
                         downtime_start = None
 
                 # Schedule next failure for this disk
-                time_to_failure = current_time + self.weibull_failure_time(shape=1.5, scale=policy.disk_mttf)
-                disk['failure_time'] = time_to_failure
-                events.append((disk['failure_time'], 'failure', disk_index))
+                time_to_failure = current_time + self.weibull_failure_time(shape=1.5, scale=disk.mttf)
+                disk_info['failure_time'] = time_to_failure
+                events.append((disk_info['failure_time'], 'failure', disk_index))
                 events.sort()
 
         # If system is down at the end of simulation, account for remaining downtime
@@ -202,7 +215,8 @@ class DataCenterSimulator:
         MTTR = total_downtime / total_replacements if total_replacements > 0 else 0
 
         return {
-            'policy_name': policy.name,
+            'server_name': server.name,
+            'disk_model': disk.model,
             'total_downtime': total_downtime,
             'total_maintenance_cost': total_maintenance_cost,
             'total_replacements': total_replacements,
@@ -213,33 +227,38 @@ class DataCenterSimulator:
 
     def run_simulations(self) -> List[Dict[str, float]]:
         """
-        Run multiple simulations for each data center policy
+        Run multiple simulations for each server-disk combination
         """
         all_results = []
         logging.info("Starting simulations...")
 
-        for policy in self.policies:
-            logging.info("Simulating policy: %s", policy.name)
-            policy_results = [
-                self.simulate_policy(policy)
+        for combination in self.combinations:
+            server = self.servers[combination['server']]
+            disk = self.disks[combination['disk']]
+
+            logging.info(f"Simulating server {server.name} with disk {disk.model}")
+
+            # Run multiple simulations for this configuration
+            config_results = [
+                self.simulate_configuration(server, disk)
                 for _ in range(self.num_simulations)
             ]
 
             # Aggregate results
             aggregated_results = {
-                'policy_name': policy.name,
-                'avg_downtime': np.mean([r['total_downtime'] for r in policy_results]),
-                'avg_maintenance_cost': np.mean([r['total_maintenance_cost'] for r in policy_results]),
-                'avg_replacements': np.mean([r['total_replacements'] for r in policy_results]),
-                'avg_availability': np.mean([r['availability'] for r in policy_results]),
-                'avg_MTBF': np.mean([r['MTBF'] for r in policy_results]),
-                'avg_MTTR': np.mean([r['MTTR'] for r in policy_results]),
+                'server_name': server.name,
+                'disk_model': disk.model,
+                'avg_downtime': np.mean([r['total_downtime'] for r in config_results]),
+                'avg_maintenance_cost': np.mean([r['total_maintenance_cost'] for r in config_results]),
+                'avg_replacements': np.mean([r['total_replacements'] for r in config_results]),
+                'avg_availability': np.mean([r['availability'] for r in config_results]),
+                'avg_MTBF': np.mean([r['MTBF'] for r in config_results]),
+                'avg_MTTR': np.mean([r['MTTR'] for r in config_results]),
                 'meets_sla': (
-                    np.mean([r['availability'] for r in policy_results]) >= self.sla_targets['availability'] and
-                    np.mean([r['total_downtime'] for r in policy_results]) <= self.sla_targets['max_downtime']
+                        np.mean([r['availability'] for r in config_results]) >= server.availability_target
                 ),
-                'std_downtime': np.std([r['total_downtime'] for r in policy_results]),
-                'std_maintenance_cost': np.std([r['total_maintenance_cost'] for r in policy_results])
+                'std_downtime': np.std([r['total_downtime'] for r in config_results]),
+                'std_maintenance_cost': np.std([r['total_maintenance_cost'] for r in config_results])
             }
 
             all_results.append(aggregated_results)
@@ -248,17 +267,15 @@ class DataCenterSimulator:
         return all_results
 
     @staticmethod
-    def save_results_to_csv(results: List[Dict[str, float]],
-                            filename: str = 'data_center_simulation_results.csv'):
+    def save_results_to_csv(results: List[Dict[str, float]], filename: str = 'data_center_simulation_results.csv'):
         """
-        Save simulation results to CSV in a formatted table style.
-        Each result will be represented in a row with clear column names.
+        Save simulation results to CSV
         """
-
         logging.info("Saving results to CSV: %s", filename)
         # Define the header with necessary columns
         keys = [
-            'policy_name',
+            'server_name',
+            'disk_model',
             'avg_downtime',
             'avg_maintenance_cost',
             'avg_replacements',
@@ -270,129 +287,116 @@ class DataCenterSimulator:
             'meets_sla'
         ]
 
-        # Extracting component-specific data (if any)
-        component_names = set()
-        for result in results:
-            for component, failures in result.get('component_failures', {}).items():
-                component_names.add(component)
-
-        # Create column names for each component's failure and downtime data
-        for component in component_names:
-            keys.append(f'component_{component}_failures')
-            keys.append(f'component_{component}_downtime')
-
         # Write to CSV file
         with open(filename, 'w', newline='') as output_file:
             dict_writer = csv.DictWriter(output_file, fieldnames=keys)
             dict_writer.writeheader()
 
             for result in results:
-                # Prepare a row with general data
-                row = {
-                    'policy_name': result['policy_name'],
-                    'avg_downtime': round(result['avg_downtime'], 2),
-                    'avg_maintenance_cost': round(result['avg_maintenance_cost'], 2),
-                    'avg_replacements': result['avg_replacements'],
-                    'avg_availability': round(result['avg_availability'], 4),
-                    'avg_MTBF': round(result['avg_MTBF'], 2),
-                    'avg_MTTR': round(result['avg_MTTR'], 2),
-                    'std_downtime': round(result['std_downtime'], 2),
-                    'std_maintenance_cost': round(result['std_maintenance_cost'], 2),
-                    'meets_sla': result['meets_sla']
-                }
+                dict_writer.writerow(result)
 
-                # Add component-specific failure and downtime data
-                for component in component_names:
-                    row[f'component_{component}_failures'] = result['component_failures'].get(component, 0)
-                    row[f'component_{component}_downtime'] = round(result['component_downtime'].get(component, 0), 2)
-
-                dict_writer.writerow(row)
-
-        logging.info("Results saved to CSV.")
+        logging.info("Results successfully saved to %s", filename)
 
     @staticmethod
     def plot_results(results: List[Dict[str, float]]):
         """
-        Create visualizations of simulation results
+        Create visualizations of simulation results and save as a PNG file.
         """
         logging.info("Generating plots...")
-        plt.figure(figsize=(15, 10))
 
-        # Availability plot
-        plt.subplot(3, 2, 1)
-        plt.bar(
-            [r['policy_name'] for r in results],
-            [r['avg_availability'] for r in results]
-        )
-        plt.title('Average System Availability')
-        plt.ylabel('Availability')
-        plt.xticks(rotation=45)
+        # Prepare data for plotting
+        servers = list(set(r['server_name'] for r in results))
+        disks = list(set(r['disk_model'] for r in results))
+
+        # Create a large figure for all subplots
+        plt.figure(figsize=(15, 12))
+
+        # Plotting the results in subplots
+
 
         # Maintenance Cost plot
-        plt.subplot(3, 2, 2)
-        plt.bar(
-            [r['policy_name'] for r in results],
-            [r['avg_maintenance_cost'] for r in results]
-        )
+        plt.subplot(2, 2, 1)
+        for server in servers:
+            server_results = [r for r in results if r['server_name'] == server]
+            plt.bar(
+                [f"{r['server_name']}-{r['disk_model']}" for r in server_results],
+                [r['avg_maintenance_cost'] for r in server_results]
+            )
         plt.title('Average Maintenance Cost')
         plt.ylabel('Cost')
-        plt.xticks(rotation=45)
+        plt.xticks(rotation=45, ha='right')
 
         # Downtime plot
-        plt.subplot(3, 2, 3)
-        plt.bar(
-            [r['policy_name'] for r in results],
-            [r['avg_downtime'] for r in results]
-        )
+        plt.subplot(2, 2, 2)
+        for server in servers:
+            server_results = [r for r in results if r['server_name'] == server]
+            plt.bar(
+                [f"{r['server_name']}-{r['disk_model']}" for r in server_results],
+                [r['avg_downtime'] for r in server_results]
+            )
         plt.title('Average Downtime')
-        plt.ylabel('Downtime')
-        plt.xticks(rotation=45)
-
-        # Replacements plot
-        plt.subplot(3, 2, 4)
-        plt.bar(
-            [r['policy_name'] for r in results],
-            [r['avg_replacements'] for r in results]
-        )
-        plt.title('Average Disk Replacements')
-        plt.ylabel('Number of Replacements')
-        plt.xticks(rotation=45)
+        plt.ylabel('Downtime (hours)')
+        plt.xticks(rotation=45, ha='right')
 
         # MTBF plot
-        plt.subplot(3, 2, 5)
-        plt.bar(
-            [r['policy_name'] for r in results],
-            [r['avg_MTBF'] for r in results]
-        )
+        plt.subplot(2, 2, 4)
+        for server in servers:
+            server_results = [r for r in results if r['server_name'] == server]
+            plt.bar(
+                [f"{r['server_name']}-{r['disk_model']}" for r in server_results],
+                [r['avg_MTBF'] for r in server_results]
+            )
         plt.title('Mean Time Between Failures (MTBF)')
-        plt.ylabel('MTBF')
-        plt.xticks(rotation=45)
+        plt.ylabel('MTBF (hours)')
+        plt.xticks(rotation=45, ha='right')
 
-        # MTTR plot
-        plt.subplot(3, 2, 6)
-        plt.bar(
-            [r['policy_name'] for r in results],
-            [r['avg_MTTR'] for r in results]
-        )
-        plt.title('Mean Time To Repair (MTTR)')
-        plt.ylabel('MTTR')
-        plt.xticks(rotation=45)
+        # Replacements plot
+        plt.subplot(2, 2, 3)
+        for server in servers:
+            server_results = [r for r in results if r['server_name'] == server]
+            plt.bar(
+                [f"{r['server_name']}-{r['disk_model']}" for r in server_results],
+                [r['avg_replacements'] for r in server_results]
+            )
+        plt.title('Average Disk Replacements')
+        plt.ylabel('Replacements')
+        plt.xticks(rotation=45, ha='right')
 
+
+
+        # Adjust layout to prevent overlapping
         plt.tight_layout()
-        plt.savefig('data_center_policy_comparison.png')
+
+        # Save the plot to a PNG file
+        plt.savefig('data_center_policy_comparison.png', format='png')
+
+        # Close the plot to free memory
         plt.close()
 
-        logging.info("Plots generated and saved to 'data_center_policy_comparison.png'.")
+        logging.info("Plots generated and saved to data_center_policy_comparison.png")
 
+    @staticmethod
+    def run_and_save(config_file: str, output_file: str = 'data_center_simulation_results.csv'):
+        """
+        A wrapper method to run simulations and save the results to a CSV file.
+        """
+        # Initialize the simulator with the provided config file
+        simulator = DataCenterSimulator(config_file)
 
-def main():
-    logging.info("Starting the data center simulation program...")
-    simulator = RailwaySystemSimulator('data_center_policies.json')
-    results = simulator.run_simulations()
-    simulator.save_results_to_csv(results)
-    simulator.plot_results(results)
-    logging.info("Program completed successfully.")
+        # Run the simulations
+        results = simulator.run_simulations()
 
+        # Save results to CSV
+        simulator.save_results_to_csv(results, output_file)
 
+        # Generate and display plots
+        simulator.plot_results(results)
+
+        logging.info("Simulation complete and results saved.")
+
+# Example usage:
 if __name__ == "__main__":
-    main()
+    # Specify the config file path (for example, 'data_center_config.json')
+    config_file = 'data_center_config.json'
+    # Run the simulation and save results to CSV
+    DataCenterSimulator.run_and_save(config_file)
