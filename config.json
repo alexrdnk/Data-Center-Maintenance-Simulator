@@ -1,0 +1,58 @@
+{
+    "time_period_hours": 4380,
+    "currency": "PLN",
+    "weibull_shape": 1.5,
+    "servers": [
+        {
+            "id": 1,
+            "disks": [
+                {
+                    "repair_cost_PLN": 2000.0,
+                    "lost_revenue_per_hour_PLN": 150.0
+                },
+                {
+                    "repair_cost_PLN": 2100.0,
+                    "lost_revenue_per_hour_PLN": 160.0
+                },
+                {
+                    "repair_cost_PLN": 1900.0,
+                    "lost_revenue_per_hour_PLN": 180.0
+                }
+            ]
+        },
+        {
+            "id": 2,
+            "disks": [
+                {
+                    "repair_cost_PLN": 2200.0,
+                    "lost_revenue_per_hour_PLN": 170.0
+                },
+                {
+                    "repair_cost_PLN": 2000.0,
+                    "lost_revenue_per_hour_PLN": 150.0
+                },
+                {
+                    "repair_cost_PLN": 2300.0,
+                    "lost_revenue_per_hour_PLN": 200.0
+                }
+            ]
+        },
+        {
+            "id": 3,
+            "disks": [
+                {
+                    "repair_cost_PLN": 2050.0,
+                    "lost_revenue_per_hour_PLN": 155.0
+                },
+                {
+                    "repair_cost_PLN": 2150.0,
+                    "lost_revenue_per_hour_PLN": 160.0
+                },
+                {
+                    "repair_cost_PLN": 1950.0,
+                    "lost_revenue_per_hour_PLN": 175.0
+                }
+            ]
+        }
+    ]
+}

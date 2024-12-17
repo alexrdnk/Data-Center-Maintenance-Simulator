@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/Data-Center-Maintenance-Simulator.iml" filepath="$PROJECT_DIR$/.idea/Data-Center-Maintenance-Simulator.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/Data-Center.iml" filepath="$PROJECT_DIR$/.idea/Data-Center.iml" />
     </modules>
   </component>
 </project>
