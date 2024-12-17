@@ -1,10 +1,11 @@
 {
-    "time_period_hours": 4380,
-    "currency": "PLN",
+    "time_period_hours": 8760,
     "weibull_shape": 1.5,
+    "currency": "PLN",
     "servers": [
         {
             "id": 1,
+            "server_repair_cost_PLN": 3500.0,
             "disks": [
                 {
                     "repair_cost_PLN": 2000.0,
@@ -22,6 +23,7 @@
         },
         {
             "id": 2,
+            "server_repair_cost_PLN": 4000.0,
             "disks": [
                 {
                     "repair_cost_PLN": 2200.0,
@@ -39,6 +41,7 @@
         },
         {
             "id": 3,
+            "server_repair_cost_PLN": 4200.0,
             "disks": [
                 {
                     "repair_cost_PLN": 2050.0,

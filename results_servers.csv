@@ -1,0 +1,4 @@
+server,downtime_hours,repair_cost,lost_revenue,mttr,mttf,availability_percent
+Server1,4.32,15106.44,2114.90,2.16,4380.00,99.95
+Server2,3.83,15329.42,1992.82,1.92,4380.00,99.96
+Server3,7.93,33292.36,3884.11,1.98,2190.00,99.91

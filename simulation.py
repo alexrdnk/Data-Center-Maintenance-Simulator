@@ -2,151 +2,365 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import weibull_min
+from scipy.special import gamma
 import csv
 import random
+import heapq
 
+def simulate_server_and_disks(sim_duration, shape, server):
+    """
+    Симуляция работы сервера и его дисков с учётом отказов сервера и дисков.
 
-def simulate_disk(sim_duration, repair_cost, lost_revenue_per_hour, shape, seed):
-    random.seed(seed)
-    np.random.seed(seed)
+    Args:
+        sim_duration (float): Длительность симуляции в часах.
+        shape (float): Параметр формы распределения Вейбулла.
+        server (dict): Конфигурация сервера из config.json.
+
+    Returns:
+        tuple: Метрики сервера и список метрик дисков.
+    """
+    server_id = server['id']
+    server_repair_cost = float(server['server_repair_cost_PLN'])  # Убедимся, что это float
+    disks = server['disks']
+    num_disks = len(disks)
+
+    # Инициализация состояния сервера и дисков
+    server_status = 'up'  # 'up' или 'down'
+    disks_status = ['up'] * num_disks  # Список статусов дисков
+
+    # Метрики сервера
+    server_total_downtime = 0.0
+    server_failures = 0
+    server_total_repair_cost = 0.0
+    server_total_lost_revenue = 0.0
+    server_downtime_intervals = []
+    server_downtime_start = None  # Для расчёта потерь дохода
+
+    # Метрики дисков
+    disks_results = []
+    for disk in disks:
+        disks_results.append({
+            'downtime': 0.0,
+            'failures': 0,
+            'repair_cost_total': 0.0,
+            'lost_revenue_total': 0.0,
+            'mttr': 0.0,
+            'mttf': 0.0,
+            'availability_percent': 100.0,  # Инициализация доступности
+            'downtime_intervals': []
+        })
+
+    # Суммарная потеря дохода всех дисков
+    total_lost_revenue_per_hour = sum(float(disk['lost_revenue_per_hour_PLN']) for disk in disks)
+
+    # События: (timestamp, event_type, component_index)
+    # event_type: 'server_fail', 'server_repair', 'disk_fail', 'disk_repair'
+    events = []
+    heapq.heapify(events)
+
+    # Расчёт масштаба для сервера
+    desired_mttf_server = sim_duration / 2  # Установим MTTF сервера в половину симуляционного периода
+    server_scale = desired_mttf_server / gamma(1 + 1/shape)
+
+    # Генерация первого отказа сервера
+    first_server_fail = weibull_min.rvs(shape, scale=server_scale)
+    heapq.heappush(events, (first_server_fail, 'server_fail', None))
+
+    # Расчёт масштаба для дисков
+    desired_mttf_disk = sim_duration / 3  # Установим MTTF дисков в треть симуляционного периода
+    disk_scale = desired_mttf_disk / gamma(1 + 1/shape)
+
+    # Генерация первого отказа каждого диска
+    for i in range(num_disks):
+        first_disk_fail = weibull_min.rvs(shape, scale=disk_scale)
+        heapq.heappush(events, (first_disk_fail, 'disk_fail', i))
 
     current_time = 0.0
-    total_downtime = 0.0
-    total_repairs = 0
 
-    scale_for_weibull = sim_duration / 2.0
+    while events:
+        event = heapq.heappop(events)
+        event_time, event_type, component_index = event
 
-    failure_time = weibull_min.rvs(shape, scale=scale_for_weibull)
-
-    while current_time < sim_duration:
-        if failure_time > sim_duration:
-            # Нет больше отказов
+        if event_time > sim_duration:
             break
 
-        # Отказ
-        current_time = failure_time
-        downtime_start = current_time
-        total_repairs += 1
+        # Обновление текущего времени
+        current_time = event_time
 
-        repair_time = 2.0
-        repair_finish = current_time + repair_time
-        if repair_finish > sim_duration:
-            repair_finish = sim_duration
+        if event_type == 'server_fail':
+            if server_status == 'up':
+                server_status = 'down'
+                server_failures += 1
+                repair_time = random.uniform(1.5, 2.5)
+                server_total_repair_cost += server_repair_cost * repair_time
+                server_downtime_start = current_time
 
-        downtime = repair_finish - downtime_start
-        total_downtime += downtime
-        current_time = repair_finish
+                # Все диски считаются в простое из-за сервера
+                for i in range(num_disks):
+                    if disks_status[i] == 'up':
+                        disks_status[i] = 'down'
+                        # Добавить простой диска из-за сервера
+                        disks_results[i]['downtime_intervals'].append((current_time, None, 'server'))
 
-        # Следующий отказ
-        failure_time = current_time + weibull_min.rvs(shape, scale=scale_for_weibull)
+                # Генерация события ремонта сервера
+                repair_finish = current_time + repair_time
+                if repair_finish > sim_duration:
+                    repair_finish = sim_duration
+                heapq.heappush(events, (repair_finish, 'server_repair', None))
 
-    # Итоговый расчет MTTF и MTTR
-    if total_repairs > 0:
-        mttr = total_downtime / total_repairs
-        mttf = sim_duration / total_repairs
+                # Добавить интервал простоя сервера
+                server_downtime_intervals.append((current_time, repair_finish))
+                server_total_downtime += (repair_finish - current_time)
+
+        elif event_type == 'server_repair':
+            if server_status == 'down':
+                server_status = 'up'
+                # Все диски восстанавливаются
+                for i in range(num_disks):
+                    if disks_status[i] == 'down':
+                        disks_status[i] = 'up'
+                        # Завершить интервал простоя диска, связанный с сервером
+                        if disks_results[i]['downtime_intervals'] and disks_results[i]['downtime_intervals'][-1][1] is None:
+                            start, _, cause = disks_results[i]['downtime_intervals'][-1]
+                            downtime = current_time - start
+                            disks_results[i]['downtime'] += downtime
+                            if cause == 'server':
+                                # Потери дохода из-за простоя сервера
+                                disks_results[i]['lost_revenue_total'] += downtime * float(disks[i]['lost_revenue_per_hour_PLN'])
+                            # Завершить интервал простоя
+                            disks_results[i]['downtime_intervals'][-1] = (start, current_time, cause)
+
+                # Потери дохода сервера как сумма потерянных доходов всех дисков
+                if server_downtime_start is not None:
+                    server_lost_revenue = (current_time - server_downtime_start) * total_lost_revenue_per_hour
+                    server_total_lost_revenue += server_lost_revenue
+
+                # Генерация следующего отказа сервера
+                next_server_fail = current_time + weibull_min.rvs(shape, scale=server_scale)
+                if next_server_fail <= sim_duration:
+                    heapq.heappush(events, (next_server_fail, 'server_fail', None))
+
+        elif event_type == 'disk_fail':
+            if server_status == 'up' and disks_status[component_index] == 'up':
+                # Отказ диска
+                disks_status[component_index] = 'down'
+                disks_results[component_index]['failures'] += 1
+                repair_time = random.uniform(1.5, 2.5)
+                disks_results[component_index]['repair_cost_total'] += float(disks[component_index]['repair_cost_PLN']) * repair_time
+                disks_results[component_index]['downtime_intervals'].append((current_time, None, 'disk'))
+
+                # Генерация события ремонта диска
+                repair_finish = current_time + repair_time
+                if repair_finish > sim_duration:
+                    repair_finish = sim_duration
+                heapq.heappush(events, (repair_finish, 'disk_repair', component_index))
+
+        elif event_type == 'disk_repair':
+            if server_status == 'up' and disks_status[component_index] == 'down':
+                # Ремонт диска
+                disks_status[component_index] = 'up'
+                # Завершить интервал простоя диска
+                if disks_results[component_index]['downtime_intervals'] and \
+                   disks_results[component_index]['downtime_intervals'][-1][1] is None:
+                    start, _, cause = disks_results[component_index]['downtime_intervals'][-1]
+                    downtime = current_time - start
+                    disks_results[component_index]['downtime'] += downtime
+                    if cause == 'disk':
+                        # Потери дохода из-за простоя диска
+                        disks_results[component_index]['lost_revenue_total'] += downtime * float(disks[component_index]['lost_revenue_per_hour_PLN'])
+                    elif cause == 'server':
+                        # Потери дохода уже учтены при восстановлении сервера
+                        pass
+                    # Завершить интервал простоя
+                    disks_results[component_index]['downtime_intervals'][-1] = (start, current_time, cause)
+
+                # Генерация следующего отказа диска
+                next_disk_fail = current_time + weibull_min.rvs(shape, scale=disk_scale)
+                if next_disk_fail <= sim_duration:
+                    heapq.heappush(events, (next_disk_fail, 'disk_fail', component_index))
+
+    # После симуляции, расчёт MTTR, MTTF и availability_percent для дисков
+    for disk in disks_results:
+        if disk['failures'] > 0:
+            disk['mttr'] = disk['downtime'] / disk['failures']
+            disk['mttf'] = sim_duration / disk['failures']
+        else:
+            disk['mttr'] = None  # or float('inf')
+            disk['mttf'] = None  # or float('inf')
+        # Calculate availability
+        disk['availability_percent'] = (1.0 - (disk['downtime'] / sim_duration)) * 100.0
+
+    # Метрики сервера
+    if server_failures > 0:
+        server_mttr = server_total_downtime / server_failures
+        server_mttf = sim_duration / server_failures
     else:
-        mttr = 0.0
-        mttf = sim_duration
+        server_mttr = 0.0
+        server_mttf = sim_duration
 
-    repair_cost_total = total_repairs * repair_cost
-    lost_revenue_total = total_downtime * lost_revenue_per_hour
-    availability_percent = (mttf/(mttf+mttr)) * 100.0
+    # Рассчитываем доступность для сервера
+    server_availability_percent = (1.0 - (server_total_downtime / sim_duration)) * 100.0
 
-    return {
-        'downtime': total_downtime,
-        'repairs': total_repairs,
-        'repair_cost_total': repair_cost_total,
-        'lost_revenue_total': lost_revenue_total,
-        'mttr': mttr,
-        'mttf': mttf,
-        'availability_percent': availability_percent
+    server_result = {
+        'downtime': server_total_downtime,
+        'failures': server_failures,
+        'repair_cost_total': server_total_repair_cost,
+        'lost_revenue': server_total_lost_revenue,
+        'mttr': server_mttr,
+        'mttf': server_mttf,
+        'availability_percent': server_availability_percent
     }
+
+    return server_result, disks_results
 
 
 def main():
+    # Установка фиксированного случайного начального seed для воспроизводимости
+    random.seed(42)
+    np.random.seed(42)
+
+    # Загрузка конфигурации
     with open('config.json', 'r') as f:
         config = json.load(f)
 
-    sim_duration = config['time_period_hours']
-    shape = config['weibull_shape']
+    sim_duration = float(config['time_period_hours'])
+    shape = float(config['weibull_shape'])
     currency = config['currency']
+    servers = config['servers']
 
-    results = []
-    labels = []
+    all_server_results = []
+    all_disk_results = []
+    disk_labels = []
+    server_labels = []
 
-    # Теперь MTTF/MTTR не берутся из конфига, для ремонта мы использовали фиктивное значение 2.0 ч в simulate_disk.
-    # Если у нас есть разные repair_cost и lost_revenue_per_hour в конфиге, используем их.
-    for server in config['servers']:
-        server_id = server['id']
-        for disk_id, disk_params in enumerate(server['disks'], start=1):
-            seed = server_id * 100 + disk_id
-            repair_cost = disk_params['repair_cost_PLN']
-            lost_revenue_per_hour = disk_params['lost_revenue_per_hour_PLN']
+    for server in servers:
+        server_label = f"Server{server['id']}"
+        server_result, disks_results = simulate_server_and_disks(sim_duration, shape, server)
+        all_server_results.append((server_label, server_result))
+        server_labels.append(server_label)
 
-            res = simulate_disk(sim_duration, repair_cost, lost_revenue_per_hour, shape, seed)
-            results.append(res)
-            labels.append(f"S{server_id}D{disk_id}")
+        for i, disk in enumerate(disks_results):
+            disk_label = f"S{server['id']}D{i + 1}"
+            all_disk_results.append((disk_label, disk))
+            disk_labels.append(disk_label)
 
-    downtime_values = [r['downtime'] for r in results]
-    repair_cost_values = [r['repair_cost_total'] for r in results]
-    lost_revenue_values = [r['lost_revenue_total'] for r in results]
-    mttr_values = [r['mttr'] for r in results]
-    mttf_values = [r['mttf'] for r in results]
-    availability_values = [r['availability_percent'] for r in results]
+    # Вывод результатов по дискам
+    print("Wyniki dla dysków:")
+    for label, disk in all_disk_results:
+        print(f"{label}: Failures={disk['failures']}, Przestój={disk['downtime']:.2f}h, "
+              f"Koszt naprawy={disk['repair_cost_total']:.2f}{currency}, "
+              f"Utracone przychody={disk['lost_revenue_total']:.2f}{currency}, "
+              f"MTTR={'N/A' if disk['mttr'] is None else f'{disk['mttr']:.2f}h'}, "
+              f"MTTF={'N/A' if disk['mttf'] is None else f'{disk['mttf']:.2f}h'}, "
+              f"Dostępność={disk['availability_percent']:.2f}%")
+    # Вывод результатов по серверам
+    print("\nWyniki dla serwerów:")
+    for label, server in all_server_results:
+        print(
+            f"{label}: Przestój={server['downtime']:.2f}h, Koszt naprawy={server['repair_cost_total']:.2f}{currency}, "
+            f"Utracone przychody={server['lost_revenue']:.2f}{currency}, "
+            f"MTTR={server['mttr']:.2f}h, MTTF={server['mttf']:.2f}h, Dostępność={server['availability_percent']:.2f}%")
 
-    print("Wyniki symulacji:")
-    for i, label in enumerate(labels):
-        print(f"{label}: Przestój={downtime_values[i]:.2f}h, Koszt naprawy={repair_cost_values[i]:.2f}{currency}, "
-              f"Utracone przychody={lost_revenue_values[i]:.2f}{currency}, Dostępność={availability_values[i]:.2f}%, "
-              f"MTTR={mttr_values[i]:.2f}h, MTTF={mttf_values[i]:.2f}h")
-
-    # Zapis do CSV
-    csv_filename = 'results.csv'
-    with open(csv_filename, 'w', newline='') as csvfile:
-        fieldnames = ['server_disk', 'downtime_hours', 'repair_cost', 'lost_revenue', 'availability_percent', 'mttr',
-                      'mttf']
+    # Сохранение результатов дисков в CSV
+    csv_filename_disks = 'results_disks.csv'
+    with open(csv_filename_disks, 'w', newline='') as csvfile:
+        fieldnames = ['server_disk', 'downtime_hours', 'repair_cost', 'lost_revenue', 'mttr', 'mttf', 'availability_percent']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
-        for i, label in enumerate(labels):
+        for label, disk in all_disk_results:
             writer.writerow({
                 'server_disk': label,
-                'downtime_hours': round(downtime_values[i], 2),
-                'repair_cost': round(repair_cost_values[i], 2),
-                'lost_revenue': round(lost_revenue_values[i], 2),
-                'availability_percent': round(availability_values[i], 2),
-                'mttr': round(mttr_values[i], 2),
-                'mttf': round(mttf_values[i], 2),
+                'downtime_hours': f"{disk['downtime']:.2f}",
+                'repair_cost': f"{disk['repair_cost_total']:.2f}",
+                'lost_revenue': f"{disk['lost_revenue_total']:.2f}",
+                'mttr': f"{disk['mttr']:.2f}",
+                'mttf': f"{disk['mttf']:.2f}",
+                'availability_percent': f"{disk['availability_percent']:.2f}",
             })
 
-    print(f"Wyniki zapisane do pliku {csv_filename}")
+    # Сохранение результатов серверов в CSV
+    csv_filename_servers = 'results_servers.csv'
+    with open(csv_filename_servers, 'w', newline='') as csvfile:
+        fieldnames = ['server', 'downtime_hours', 'repair_cost', 'lost_revenue', 'mttr', 'mttf', 'availability_percent']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for label, server in all_server_results:
+            writer.writerow({
+                'server': label,
+                'downtime_hours': f"{server['downtime']:.2f}",
+                'repair_cost': f"{server['repair_cost_total']:.2f}",
+                'lost_revenue': f"{server['lost_revenue']:.2f}",
+                'mttr': f"{server['mttr']:.2f}",
+                'mttf': f"{server['mttf']:.2f}",
+                'availability_percent': f"{server['availability_percent']:.2f}",
+            })
 
-    # Tworzenie wykresów
-    x = np.arange(len(labels))
-    fig, axes = plt.subplots(4, 1, figsize=(10, 14))
+    print(f"\nWyniki zapisane do plików {csv_filename_disks} i {csv_filename_servers}")
 
-    axes[0].bar(x, downtime_values, color='tab:red')
-    axes[0].set_title('Czas przestoju')
-    axes[0].set_ylabel('Godziny')
-    axes[0].set_xticks(x)
-    axes[0].set_xticklabels(labels)
+    # Построение графиков для дисков и серверов
+    # Подготовка данных
+    downtime_values_disks = [d[1]['downtime'] for d in all_disk_results]
+    repair_cost_values_disks = [d[1]['repair_cost_total'] for d in all_disk_results]
+    lost_revenue_values_disks = [d[1]['lost_revenue_total'] for d in all_disk_results]
+    labels_disks = [d[0] for d in all_disk_results]
 
-    axes[1].bar(x, repair_cost_values, color='tab:blue')
-    axes[1].set_title('Koszty naprawy')
-    axes[1].set_ylabel(f'Koszt ({currency})')
-    axes[1].set_xticks(x)
-    axes[1].set_xticklabels(labels)
+    downtime_values_servers = [s[1]['downtime'] for s in all_server_results]
+    repair_cost_values_servers = [s[1]['repair_cost_total'] for s in all_server_results]
+    lost_revenue_values_servers = [s[1]['lost_revenue'] for s in all_server_results]
+    labels_servers = [s[0] for s in all_server_results]
 
-    axes[2].bar(x, lost_revenue_values, color='tab:orange')
-    axes[2].set_title('Utracone przychody')
-    axes[2].set_ylabel(f'Kwota ({currency})')
-    axes[2].set_xticks(x)
-    axes[2].set_xticklabels(labels)
+    # Определение позиции для дисков и серверов
+    num_disks = len(labels_disks)
+    num_servers = len(labels_servers)
+    x_disks = np.arange(num_disks)
+    x_servers = np.arange(num_servers)
 
-    axes[3].bar(x, availability_values, color='tab:green')
-    axes[3].set_title('Dostępność (%)')
-    axes[3].set_ylabel('Procent')
-    axes[3].set_xticks(x)
-    axes[3].set_xticklabels(labels)
+    # Создание фигуры с двумя столбцами
+    fig, axes = plt.subplots(3, 2, figsize=(20, 15))
+
+    # Метрики дисков
+    # Czas przestoju dysków
+    axes[0, 0].bar(x_disks, downtime_values_disks, color='tab:red')
+    axes[0, 0].set_title('Czas przestoju dysków')
+    axes[0, 0].set_ylabel('Godziny')
+    axes[0, 0].set_xticks(x_disks)
+    axes[0, 0].set_xticklabels(labels_disks, rotation=45, ha='right')
+
+    # Koszty naprawy dysków
+    axes[1, 0].bar(x_disks, repair_cost_values_disks, color='tab:blue')
+    axes[1, 0].set_title('Koszty naprawy dysków')
+    axes[1, 0].set_ylabel(f'Koszt ({currency})')
+    axes[1, 0].set_xticks(x_disks)
+    axes[1, 0].set_xticklabels(labels_disks, rotation=45, ha='right')
+
+    # Utracone przychody z dysków
+    axes[2, 0].bar(x_disks, lost_revenue_values_disks, color='tab:orange')
+    axes[2, 0].set_title('Utracone przychody z dysków')
+    axes[2, 0].set_ylabel(f'Kwota ({currency})')
+    axes[2, 0].set_xticks(x_disks)
+    axes[2, 0].set_xticklabels(labels_disks, rotation=45, ha='right')
+
+    # Метрики серверов
+    # Czas przestoju serwerów
+    axes[0, 1].bar(x_servers, downtime_values_servers, color='tab:purple')
+    axes[0, 1].set_title('Czas przestoju serwerów')
+    axes[0, 1].set_ylabel('Godziny')
+    axes[0, 1].set_xticks(x_servers)
+    axes[0, 1].set_xticklabels(labels_servers, rotation=45, ha='right')
+
+    # Koszty naprawy serwerów
+    axes[1, 1].bar(x_servers, repair_cost_values_servers, color='tab:brown')
+    axes[1, 1].set_title('Koszty naprawy serwerów')
+    axes[1, 1].set_ylabel(f'Koszt ({currency})')
+    axes[1, 1].set_xticks(x_servers)
+    axes[1, 1].set_xticklabels(labels_servers, rotation=45, ha='right')
+
+    # Utracone przychody serwerów
+    axes[2, 1].bar(x_servers, lost_revenue_values_servers, color='tab:cyan')
+    axes[2, 1].set_title('Utracone przychody serwerów')
+    axes[2, 1].set_ylabel(f'Kwota ({currency})')
+    axes[2, 1].set_xticks(x_servers)
+    axes[2, 1].set_xticklabels(labels_servers, rotation=45, ha='right')
 
     plt.tight_layout()
     plt.savefig('servers_disks_results.png')
