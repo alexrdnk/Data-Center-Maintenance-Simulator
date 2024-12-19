@@ -9,7 +9,6 @@ import heapq
 
 
 def simulate_server_and_disks(sim_duration, shape, server):
-
     server_id = server['id']
     server_repair_cost = float(server['server_repair_cost_PLN'])
     server_failure_rate = float(server['failure_rate'])
@@ -17,10 +16,8 @@ def simulate_server_and_disks(sim_duration, shape, server):
     disks = server['disks']
     num_disks = len(disks)
 
-
     server_status = 'up'
     disks_status = ['up'] * num_disks
-
 
     server_total_downtime = 0.0
     server_failures = 0
@@ -28,7 +25,6 @@ def simulate_server_and_disks(sim_duration, shape, server):
     server_total_lost_revenue = 0.0
     server_downtime_intervals = []
     server_downtime_start = None
-
 
     disks_results = []
     for disk in disks:
@@ -44,7 +40,6 @@ def simulate_server_and_disks(sim_duration, shape, server):
         })
 
     total_lost_revenue_per_hour = sum(float(disk['lost_revenue_per_hour_PLN']) for disk in disks)
-
 
     events = []
     heapq.heapify(events)
@@ -83,19 +78,11 @@ def simulate_server_and_disks(sim_duration, shape, server):
                 server_total_repair_cost += server_repair_cost
                 server_downtime_start = current_time
 
-
-                for i in range(num_disks):
-                    if disks_status[i] == 'up':
-                        disks_status[i] = 'down'
-                        disks_results[i]['downtime_intervals'].append((current_time, None))
-
-
                 repair_time = random.uniform(1.5, 2.5)
                 repair_finish = current_time + repair_time
                 if repair_finish > sim_duration:
                     repair_finish = sim_duration
                 heapq.heappush(events, (repair_finish, 'server_repair', None))
-
 
                 server_downtime_intervals.append((current_time, repair_finish))
                 server_total_downtime += (repair_finish - current_time)
@@ -104,27 +91,9 @@ def simulate_server_and_disks(sim_duration, shape, server):
             if server_status == 'down':
                 server_status = 'up'
 
-                for i in range(num_disks):
-                    if disks_status[i] == 'down':
-                        disks_status[i] = 'up'
-
-                        if disks_results[i]['downtime_intervals'] and disks_results[i]['downtime_intervals'][-1][1] is None:
-                            start, _ = disks_results[i]['downtime_intervals'][-1]
-                            downtime = current_time - start
-                            disks_results[i]['downtime'] += downtime
-
-
-                            lost_revenue = downtime * float(disks[i]['lost_revenue_per_hour_PLN'])
-                            disks_results[i]['lost_revenue_total'] += lost_revenue
-
-
-                            disks_results[i]['downtime_intervals'][-1] = (start, current_time)
-
-
                 if server_downtime_start is not None:
-                    server_lost_revenue = (current_time - server_downtime_start) * total_lost_revenue_per_hour
+                    server_lost_revenue = (current_time - server_downtime_start) * maintenance_cost_per_hour
                     server_total_lost_revenue += server_lost_revenue
-
 
                 next_server_fail = current_time + weibull_min.rvs(shape, scale=server_scale)
                 if next_server_fail <= sim_duration:
@@ -132,12 +101,10 @@ def simulate_server_and_disks(sim_duration, shape, server):
 
         elif event_type == 'disk_fail':
             if server_status == 'up' and disks_status[component_index] == 'up':
-
                 disks_status[component_index] = 'down'
                 disks_results[component_index]['failures'] += 1
                 disks_results[component_index]['repair_cost_total'] += float(disks[component_index]['repair_cost_PLN'])
                 disks_results[component_index]['downtime_intervals'].append((current_time, None))
-
 
                 repair_time = random.uniform(1.5, 2.5)
                 repair_finish = current_time + repair_time
@@ -147,7 +114,6 @@ def simulate_server_and_disks(sim_duration, shape, server):
 
         elif event_type == 'disk_repair':
             if server_status == 'up' and disks_status[component_index] == 'down':
-
                 disks_status[component_index] = 'up'
 
                 if disks_results[component_index]['downtime_intervals'] and \
@@ -156,39 +122,21 @@ def simulate_server_and_disks(sim_duration, shape, server):
                     downtime = current_time - start
                     disks_results[component_index]['downtime'] += downtime
 
-
                     lost_revenue = downtime * float(disks[component_index]['lost_revenue_per_hour_PLN'])
                     disks_results[component_index]['lost_revenue_total'] += lost_revenue
 
-
                     disks_results[component_index]['downtime_intervals'][-1] = (start, current_time)
-
 
                 next_disk_fail = current_time + weibull_min.rvs(shape, scale=disk_scales[component_index])
                 if next_disk_fail <= sim_duration:
                     heapq.heappush(events, (next_disk_fail, 'disk_fail', component_index))
 
-
     if server_status == 'down' and server_downtime_start is not None:
         downtime = sim_duration - server_downtime_start
         server_total_downtime += downtime
-        server_lost_revenue = downtime * total_lost_revenue_per_hour
+        server_lost_revenue = downtime * maintenance_cost_per_hour
         server_total_lost_revenue += server_lost_revenue
         server_downtime_intervals.append((server_downtime_start, sim_duration))
-
-        for i in range(num_disks):
-            if disks_status[i] == 'down' and disks_results[i]['downtime_intervals'] and \
-                    disks_results[i]['downtime_intervals'][-1][1] is None:
-                start, _ = disks_results[i]['downtime_intervals'][-1]
-                disk_downtime = sim_duration - start
-                disks_results[i]['downtime'] += disk_downtime
-
-
-                lost_revenue = disk_downtime * float(disks[i]['lost_revenue_per_hour_PLN'])
-                disks_results[i]['lost_revenue_total'] += lost_revenue
-
-
-                disks_results[i]['downtime_intervals'][-1] = (start, sim_duration)
 
     for i in range(num_disks):
         if disks_status[i] == 'down' and disks_results[i]['downtime_intervals'] and \
@@ -197,10 +145,8 @@ def simulate_server_and_disks(sim_duration, shape, server):
             disk_downtime = sim_duration - start
             disks_results[i]['downtime'] += disk_downtime
 
-
             lost_revenue = disk_downtime * float(disks[i]['lost_revenue_per_hour_PLN'])
             disks_results[i]['lost_revenue_total'] += lost_revenue
-
 
             disks_results[i]['downtime_intervals'][-1] = (start, sim_duration)
 
@@ -338,25 +284,20 @@ def main():
 
     print(f"\nWyniki zapisane do plików {csv_filename_disks} i {csv_filename_servers}")
 
-
     downtime_values_disks = [d[1]['downtime'] for d in all_disk_results]
     repair_cost_values_disks = [d[1]['repair_cost_total'] for d in all_disk_results]
-    lost_revenue_values_disks = [d[1]['lost_revenue_total'] for d in all_disk_results]
     labels_disks = [d[0] for d in all_disk_results]
 
     downtime_values_servers = [s[1]['downtime'] for s in all_server_results]
     repair_cost_values_servers = [s[1]['repair_cost_total'] for s in all_server_results]
     labels_servers = [s[0] for s in all_server_results]
 
-
     num_disks = len(labels_disks)
     num_servers = len(labels_servers)
     x_disks = np.arange(num_disks)
     x_servers = np.arange(num_servers)
 
-
     fig, axes = plt.subplots(3, 2, figsize=(25, 20))
-
 
     axes[0, 0].bar(x_disks, downtime_values_disks, color='tab:red')
     axes[0, 0].set_title('Czas przestoju dysków')
@@ -364,13 +305,11 @@ def main():
     axes[0, 0].set_xticks(x_disks)
     axes[0, 0].set_xticklabels(labels_disks, rotation=45, ha='right')
 
-
     axes[1, 0].bar(x_disks, repair_cost_values_disks, color='tab:blue')
     axes[1, 0].set_title('Koszty naprawy dysków')
     axes[1, 0].set_ylabel(f'Koszt ({currency})')
     axes[1, 0].set_xticks(x_disks)
     axes[1, 0].set_xticklabels(labels_disks, rotation=45, ha='right')
-
 
     axes[0, 1].bar(x_servers, downtime_values_servers, color='tab:purple')
     axes[0, 1].set_title('Czas przestoju serwerów')
@@ -378,13 +317,11 @@ def main():
     axes[0, 1].set_xticks(x_servers)
     axes[0, 1].set_xticklabels(labels_servers, rotation=45, ha='right')
 
-
     axes[1, 1].bar(x_servers, repair_cost_values_servers, color='tab:brown')
     axes[1, 1].set_title('Koszty naprawy serwerów')
     axes[1, 1].set_ylabel(f'Koszt ({currency})')
     axes[1, 1].set_xticks(x_servers)
     axes[1, 1].set_xticklabels(labels_servers, rotation=45, ha='right')
-
 
     lost_revenue_servers = [s[1]['lost_revenue'] for s in all_server_results]
 
@@ -394,14 +331,12 @@ def main():
         server_key = f"Server{server_id}"
         lost_revenue_disks_per_server[server_key] += disk['lost_revenue_total']
 
-
     sorted_server_labels = sorted(lost_revenue_disks_per_server.keys(), key=lambda x: int(x[6:]))
 
     lost_revenue_disks_sorted = [lost_revenue_disks_per_server[label] for label in sorted_server_labels]
     lost_revenue_servers_sorted = [lost_revenue_servers[i] for i, label in enumerate(sorted_server_labels)]
 
     x_combined = np.arange(num_servers)
-
     width = 0.35
 
     axes[2, 0].bar(x_combined - width/2, lost_revenue_servers_sorted, width, label='Server Lost Revenue', color='tab:cyan')
@@ -411,7 +346,6 @@ def main():
     axes[2, 0].set_xticks(x_combined)
     axes[2, 0].set_xticklabels(sorted_server_labels, rotation=45, ha='right')
     axes[2, 0].legend()
-
 
     maintenance_costs = [s[1]['maintenance_cost_total'] for s in all_server_results]
     labels_maintenance = [s[0] for s in all_server_results]
